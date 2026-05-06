@@ -50,12 +50,23 @@ generate_secret()   { openssl rand -base64 32 | tr -d '\n'; }
 generate_password() { openssl rand -hex 24    | tr -d '\n'; }
 
 get_env() {
+  # tr -d '\r' is defensive — protects against .env files that picked up
+  # Windows-style CRLF line endings somehow (heredocs pasted via the
+  # Windows clipboard, files edited in Notepad on the deploy server,
+  # rsync'd from a Windows box, etc). Without it, the value is returned
+  # with a trailing \r that ends up embedded mid-line on the next write
+  # and corrupts the file. install.sh on a real Linux client server
+  # would never hit this — production .env stays \n-only end to end —
+  # but the cost of the guard is negligible.
   [ -f .env ] && grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- \
-    | sed 's/[[:space:]]*#.*//' | tr -d '"' | tr -d "'" || true
+    | sed 's/[[:space:]]*#.*//' | tr -d '"' | tr -d "'" | tr -d '\r' || true
 }
 
 set_env() {
-  local key="$1" value="$2"
+  local key="$1" value
+  # Strip CR from the incoming value too, so a `set_env KEY "$(get_env OTHER)"`
+  # chain can never propagate a \r picked up upstream.
+  value=$(printf '%s' "$2" | tr -d '\r')
   if grep -qE "^$key=" .env 2>/dev/null; then
     # Use a unique delimiter — values may contain /
     sed -i.bak "s|^$key=.*|$key=$value|" .env && rm -f .env.bak
