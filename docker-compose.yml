@@ -93,7 +93,14 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    # Token via TUNNEL_TOKEN env var (cloudflared reads this natively)
+    # rather than the command line, so it doesn't appear in `ps aux` and
+    # the command stays static across re-deploys. To pick up a token
+    # change in .env: `docker compose up -d cloudflared` — `restart`
+    # alone won't re-evaluate the env from .env on an existing container.
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
     depends_on:
       - app
     mem_limit: 128m

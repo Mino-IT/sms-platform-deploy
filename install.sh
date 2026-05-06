@@ -224,14 +224,16 @@ echo
 echo "   The Settings UI walks through each section's setup steps."
 echo
 echo "4. After Site URL + Cloudflare tunnel are configured + saved,"
-echo "   restart on this server so the new public URL takes effect:"
-echo "      docker compose restart"
+echo "   apply on this server so the new values take effect:"
+echo "      docker compose up -d"
+echo "   (NOT 'docker compose restart' — restart alone doesn't re-read .env.)"
 echo
 
 bold "Reference"
 echo "  Logs:        docker compose logs -f app"
 echo "  Status:      docker compose ps"
-echo "  Restart:     docker compose restart"
+echo "  Apply env:   docker compose up -d         (re-reads .env, recreates containers if config changed)"
+echo "  Bounce only: docker compose restart       (process kill+start, does NOT re-read .env)"
 echo "  Upgrade:     docker compose pull && docker compose up -d"
 echo "  Stop:        docker compose down"
 echo
