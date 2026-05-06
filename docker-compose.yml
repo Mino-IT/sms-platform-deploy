@@ -1,0 +1,105 @@
+# Production deployment compose — pulls a pre-built image from GHCR.
+# Used by every client deployment. The image tag is controlled via
+# IMAGE_TAG in .env (default: 1, which auto-rolls to the latest 1.x.x).
+# Dev machines override this with docker-compose.dev.yml so they build
+# from local source instead.
+
+services:
+  app:
+    image: ghcr.io/brodieminoit/sms-platform:${IMAGE_TAG:-1}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://sms:${DB_PASSWORD}@postgres:5432/smsdb
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_CLIENT_ID:-}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET:-}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID:-}
+      AZURE_AD_ADMIN_GROUP_ID: ${AZURE_AD_ADMIN_GROUP_ID:-}
+      AZURE_AD_MANAGER_GROUP_ID: ${AZURE_AD_MANAGER_GROUP_ID:-}
+      AZURE_AD_AGENT_GROUP_ID: ${AZURE_AD_AGENT_GROUP_ID:-}
+      ENFONICA_SERVICE_ACCOUNT: ${ENFONICA_SERVICE_ACCOUNT:-}
+      ENFONICA_NUMBER: ${ENFONICA_NUMBER:-}
+      ENFONICA_WEBHOOK_SECRET: ${ENFONICA_WEBHOOK_SECRET:-}
+      SETUP_APP_CLIENT_SECRET: ${SETUP_APP_CLIENT_SECRET:-}
+    volumes:
+      - ./.env:/app/config/host.env
+      - sms_uploads:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health',r=>r.statusCode===200?process.exit(0):process.exit(1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: 1500m
+    cpus: '1.5'
+
+  worker:
+    image: ghcr.io/brodieminoit/sms-platform:${IMAGE_TAG:-1}
+    command: ["worker"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://sms:${DB_PASSWORD}@postgres:5432/smsdb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app:
+        condition: service_started
+    mem_limit: 512m
+    cpus: '0.5'
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: smsdb
+      POSTGRES_USER: sms
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sms -d smsdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    cpus: '0.75'
+
+  db-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      TZ: ${TZ:-Australia/Brisbane}
+      BACKUP_HOUR: ${BACKUP_HOUR:-2}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_AZURE_SAS_URL: ${BACKUP_AZURE_SAS_URL:-}
+    volumes:
+      - sms_backups:/backups
+      - sms_uploads:/uploads:ro
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: '0.5'
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - app
+    mem_limit: 128m
+    cpus: '0.25'
+
+volumes:
+  postgres_data:
+  sms_uploads:
+  sms_backups:
