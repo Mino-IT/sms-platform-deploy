@@ -115,34 +115,27 @@ fi
 
 GENERATED=()
 
-# NEXTAUTH_URL — prompt the tech for the FINAL public URL.
-# The app runs on localhost first; the public URL becomes reachable
-# after Cloudflare Tunnel is configured via Settings (post-install).
+# NEXTAUTH_URL — auto-set to local access for first-run setup.
+# The tech updates this to the production URL via
+# Settings → Environment Variables AFTER the Cloudflare tunnel is up
+# and the public domain actually resolves. Setting it to the public
+# URL upfront causes login redirects to a not-yet-reachable domain.
 NEXTAUTH_URL=$(get_env NEXTAUTH_URL)
 if [ -z "$NEXTAUTH_URL" ]; then
-  echo
-  bold "What's the public URL this deployment will be accessed at?"
-  echo "  Production:  https://sms.client-domain.com.au"
-  echo "  Local test:  http://localhost:3000"
-  echo
-  echo "Saved as NEXTAUTH_URL. Used for links in emails / webhook signatures."
-  echo "First-run setup happens on http://localhost:3000 regardless — the"
-  echo "public URL only resolves once you configure Cloudflare Tunnel below."
-  echo
-  read -r -p "URL: " NEXTAUTH_URL
-  if [ -z "$NEXTAUTH_URL" ]; then
-    red "URL is required. Re-run when you have one."
-    exit 1
+  # Prefer the server's LAN IP so the tech can browse from another
+  # machine on the same network. Fall back to localhost if hostname -I
+  # returns nothing (e.g. on Windows running this in WSL).
+  LAN_IP=""
+  if command -v hostname >/dev/null 2>&1; then
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
   fi
-  # Reject obviously-bad input early so we don't write garbage to .env.
-  # Full URL validation is out of scope for a shell script — Docker /
-  # NextAuth will fail later if the URL is malformed.
-  if ! printf '%s' "$NEXTAUTH_URL" | grep -qE '^https?://[^[:space:]]+$'; then
-    red "URL must start with http:// or https:// and contain no spaces."
-    red "Got: ${NEXTAUTH_URL}"
-    exit 1
+  if [ -n "$LAN_IP" ] && [ "$LAN_IP" != "127.0.0.1" ]; then
+    NEXTAUTH_URL="http://${LAN_IP}:3000"
+  else
+    NEXTAUTH_URL="http://localhost:3000"
   fi
   set_env NEXTAUTH_URL "$NEXTAUTH_URL"
+  GENERATED+=("NEXTAUTH_URL = ${NEXTAUTH_URL}  (update to public URL via Settings once Cloudflare tunnel is up)")
 fi
 
 # NEXTAUTH_SECRET — auto-generated
@@ -200,19 +193,6 @@ if [ ${#GENERATED[@]} -gt 0 ]; then
   echo
 fi
 
-# Detect the server's primary LAN IP so the tech has a non-localhost
-# option for first-run setup (useful when SSH'd into a remote VM).
-LOCAL_IP=""
-if command -v hostname >/dev/null 2>&1; then
-  LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-fi
-
-# Local-only deployments don't need the Cloudflare Tunnel walkthrough.
-IS_LOCAL_ONLY=false
-if printf '%s' "$NEXTAUTH_URL" | grep -qE '^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|/|$)'; then
-  IS_LOCAL_ONLY=true
-fi
-
 bold "Next steps"
 echo
 
@@ -220,29 +200,23 @@ echo "1. Wait ~30 seconds for the app container to finish starting."
 echo "   Watch progress: docker compose logs -f app"
 echo
 echo "2. Open the first-run setup page in a browser:"
-echo "      http://localhost:3000/setup"
-if [ -n "$LOCAL_IP" ] && [ "$LOCAL_IP" != "127.0.0.1" ]; then
-  echo "      http://${LOCAL_IP}:3000/setup    (from another machine on the LAN)"
-fi
+echo "      ${NEXTAUTH_URL}/setup"
 echo "   Create the admin account (12+ chars, mixed case, number, symbol)."
 echo
-
-if [ "$IS_LOCAL_ONLY" = "false" ]; then
-  echo "3. Configure Cloudflare Tunnel so the public URL works:"
-  echo "      Sign in to the app → Settings → Platform → Cloudflare Tunnel"
-  echo "      Paste the tunnel token, click Save."
-  echo "   Then on this server, run:"
-  echo "      docker compose restart cloudflared"
-  echo
-  echo "4. Verify the public URL resolves:"
-  echo "      ${NEXTAUTH_URL}/api/health   (should return {\"status\":\"ok\"})"
-  echo
-  echo "5. (Optional) Configure Mino IT setup secret + Enfonica credentials in Settings."
-else
-  echo "3. (Optional) Configure Mino IT setup secret + Enfonica credentials in Settings."
-fi
-
+echo "3. Sign in. Everything else is configured via Settings → Platform:"
+echo "      • Site URL          — set the public URL (e.g. https://sms.client.com.au)"
+echo "      • Cloudflare Tunnel — paste the tunnel token from the Cloudflare dashboard"
+echo "      • Mino IT Setup     — paste the setup secret (Mino IT provides at handover)"
+echo "      • Backups           — schedule, retention, optional Azure SAS URL"
+echo "      • Enfonica          — SMS provider credentials"
 echo
+echo "   The Settings UI walks through each section's setup steps."
+echo
+echo "4. After Site URL + Cloudflare tunnel are configured + saved,"
+echo "   restart on this server so the new public URL takes effect:"
+echo "      docker compose restart"
+echo
+
 bold "Reference"
 echo "  Logs:        docker compose logs -f app"
 echo "  Status:      docker compose ps"
