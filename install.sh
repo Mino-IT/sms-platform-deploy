@@ -115,12 +115,20 @@ fi
 
 GENERATED=()
 
-# NEXTAUTH_URL — prompt the tech (the only thing they have to enter)
+# NEXTAUTH_URL — prompt the tech for the FINAL public URL.
+# The app runs on localhost first; the public URL becomes reachable
+# after Cloudflare Tunnel is configured via Settings (post-install).
 NEXTAUTH_URL=$(get_env NEXTAUTH_URL)
 if [ -z "$NEXTAUTH_URL" ]; then
   echo
-  bold "What's the public URL for this deployment?"
-  echo "Examples: https://sms.niagaratherapy.com.au  or  http://192.168.1.50:3000"
+  bold "What's the public URL this deployment will be accessed at?"
+  echo "  Production:  https://sms.client-domain.com.au"
+  echo "  Local test:  http://localhost:3000"
+  echo
+  echo "Saved as NEXTAUTH_URL. Used for links in emails / webhook signatures."
+  echo "First-run setup happens on http://localhost:3000 regardless — the"
+  echo "public URL only resolves once you configure Cloudflare Tunnel below."
+  echo
   read -r -p "URL: " NEXTAUTH_URL
   if [ -z "$NEXTAUTH_URL" ]; then
     red "URL is required. Re-run when you have one."
@@ -192,13 +200,53 @@ if [ ${#GENERATED[@]} -gt 0 ]; then
   echo
 fi
 
-echo "Next steps:"
-echo "  1. Wait ~30 seconds for the app container to finish starting"
-echo "  2. Visit: ${NEXTAUTH_URL}/setup"
-echo "  3. Create the admin account"
-echo "  4. Configure Mino IT setup secret + Enfonica credentials in Settings"
+# Detect the server's primary LAN IP so the tech has a non-localhost
+# option for first-run setup (useful when SSH'd into a remote VM).
+LOCAL_IP=""
+if command -v hostname >/dev/null 2>&1; then
+  LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+fi
+
+# Local-only deployments don't need the Cloudflare Tunnel walkthrough.
+IS_LOCAL_ONLY=false
+if printf '%s' "$NEXTAUTH_URL" | grep -qE '^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|/|$)'; then
+  IS_LOCAL_ONLY=true
+fi
+
+bold "Next steps"
 echo
-echo "Logs:    docker compose logs -f app"
-echo "Status:  docker compose ps"
-echo "Update:  docker compose pull && docker compose up -d"
+
+echo "1. Wait ~30 seconds for the app container to finish starting."
+echo "   Watch progress: docker compose logs -f app"
+echo
+echo "2. Open the first-run setup page in a browser:"
+echo "      http://localhost:3000/setup"
+if [ -n "$LOCAL_IP" ] && [ "$LOCAL_IP" != "127.0.0.1" ]; then
+  echo "      http://${LOCAL_IP}:3000/setup    (from another machine on the LAN)"
+fi
+echo "   Create the admin account (12+ chars, mixed case, number, symbol)."
+echo
+
+if [ "$IS_LOCAL_ONLY" = "false" ]; then
+  echo "3. Configure Cloudflare Tunnel so the public URL works:"
+  echo "      Sign in to the app → Settings → Platform → Cloudflare Tunnel"
+  echo "      Paste the tunnel token, click Save."
+  echo "   Then on this server, run:"
+  echo "      docker compose restart cloudflared"
+  echo
+  echo "4. Verify the public URL resolves:"
+  echo "      ${NEXTAUTH_URL}/api/health   (should return {\"status\":\"ok\"})"
+  echo
+  echo "5. (Optional) Configure Mino IT setup secret + Enfonica credentials in Settings."
+else
+  echo "3. (Optional) Configure Mino IT setup secret + Enfonica credentials in Settings."
+fi
+
+echo
+bold "Reference"
+echo "  Logs:        docker compose logs -f app"
+echo "  Status:      docker compose ps"
+echo "  Restart:     docker compose restart"
+echo "  Upgrade:     docker compose pull && docker compose up -d"
+echo "  Stop:        docker compose down"
 echo
