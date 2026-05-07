@@ -180,36 +180,44 @@ for key in SETUP_APP_CLIENT_SECRET ENFONICA_SERVICE_ACCOUNT ENFONICA_NUMBER \
   fi
 done
 
-# Permission setup so the container can write to .env via the bind mount.
-# The container runs as nextjs (uid 1001). .env is created by the host
-# user (this script), so by default the host user owns it. The container
-# can't write to a file it doesn't own with mode 600 → every Settings UI
-# save fails with "Failed to save settings" (EACCES on /app/config/host.env).
+# Permission setup so two things both work:
+#   1. The container (uid 1001 = nextjs) can WRITE .env. Settings UI saves
+#      go through the bind-mounted .env at /app/config/host.env. Without
+#      write access here every save fails with EACCES → "Failed to save
+#      settings".
+#   2. The host user (whoever runs `docker compose` commands) can READ
+#      .env. docker compose substitutes ${VAR} from .env at command time
+#      running as the host user — without read access, every compose
+#      command fails with permission denied.
 #
-# Fix: chown to 1001:1001 so the container's nextjs user owns it. mode
-# 600 is fine because owner = container = the only thing that needs to
-# write to it. Trade-off: the host user can no longer edit .env directly
-# with their normal account — they need sudo. Acceptable since
-# day-to-day editing happens through the Settings UI anyway.
+# Strategy: owner=1001 (container), group=docker (host users running
+# Docker), mode 640 (owner rw, group r, others none).
 #
-# Tried chgrp + mode 660 first (preserves host user as owner) but that
-# requires the container's nextjs user to be a member of gid 1001, which
-# depends on Dockerfile group membership and was only reliable from
-# v1.1.6 onward. chown is image-version-independent.
-if ! chown 1001:1001 .env 2>/dev/null; then
-  if command -v sudo >/dev/null 2>&1; then
-    if ! sudo chown 1001:1001 .env; then
-      red "Failed to chown .env to uid 1001. Container won't be able to save Settings."
-      red "Run this manually after install: sudo chown 1001:1001 .env && sudo chmod 600 .env"
-      exit 1
-    fi
-  else
-    red "Cannot chown .env to uid 1001 — sudo not available and not running as root."
-    red "The container won't be able to save Settings. Run as root or fix manually after install."
-    exit 1
-  fi
+# Why the docker group: anyone able to run `docker` without sudo is
+# already in this group, and they can read host.env from inside the
+# container anyway via `docker compose exec app cat /app/config/host.env`.
+# So group-read on .env to the docker group is not new exposure — it
+# matches the existing access boundary.
+#
+# Fallback: if there's no docker group (rare), use the host user's
+# primary group — at least the install user can run docker compose.
+
+if [ "$EUID" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+
+GROUP_ID=$(getent group docker 2>/dev/null | cut -d: -f3 || true)
+if [ -z "$GROUP_ID" ]; then
+  GROUP_ID=$(id -g)
+  yellow "  no 'docker' group on this host; using primary group $(id -gn) — only $(id -un) will be able to run docker compose"
 fi
-chmod 600 .env
+
+if ! $SUDO chown "1001:$GROUP_ID" .env; then
+  red "Failed to chown .env. The container won't be able to save Settings, or"
+  red "you won't be able to run docker compose. Run manually:"
+  red "  sudo chown 1001:$GROUP_ID .env"
+  red "  sudo chmod 640 .env"
+  exit 1
+fi
+$SUDO chmod 640 .env
 
 # ── Pull + start ─────────────────────────────────────────────────────────────
 
