@@ -12,12 +12,12 @@
 # to download.)
 #
 # Usage on a fresh Ubuntu server:
-#   curl -fsSL https://raw.githubusercontent.com/BrodieMinoIT/sms-platform-deploy/main/install.sh -o install.sh
+#   curl -fsSL https://raw.githubusercontent.com/Mino-IT/sms-platform-deploy/main/install.sh -o install.sh
 #   chmod +x install.sh
 #   sudo ./install.sh
 #
 # To pin to a specific release (recommended):
-#   curl -fsSL https://raw.githubusercontent.com/BrodieMinoIT/sms-platform-deploy/v1.0.0/install.sh -o install.sh
+#   curl -fsSL https://raw.githubusercontent.com/Mino-IT/sms-platform-deploy/v1.0.0/install.sh -o install.sh
 #
 # Re-running is safe — existing values in .env are preserved, only
 # missing values are filled.
@@ -28,7 +28,7 @@ set -euo pipefail
 
 # Defaults to "main"; override on the curl URL by pinning to a tag (above).
 GITHUB_REF="${GITHUB_REF:-main}"
-RAW_BASE="https://raw.githubusercontent.com/BrodieMinoIT/sms-platform-deploy/${GITHUB_REF}"
+RAW_BASE="https://raw.githubusercontent.com/Mino-IT/sms-platform-deploy/${GITHUB_REF}"
 INSTALL_DIR="${INSTALL_DIR:-$(pwd)}"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

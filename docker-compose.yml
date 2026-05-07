@@ -6,7 +6,7 @@
 
 services:
   app:
-    image: ghcr.io/brodieminoit/sms-platform:${IMAGE_TAG:-1}
+    image: ghcr.io/mino-it/sms-platform:${IMAGE_TAG:-1}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://sms:${DB_PASSWORD}@postgres:5432/smsdb
@@ -40,7 +40,7 @@ services:
     cpus: '1.5'
 
   worker:
-    image: ghcr.io/brodieminoit/sms-platform:${IMAGE_TAG:-1}
+    image: ghcr.io/mino-it/sms-platform:${IMAGE_TAG:-1}
     command: ["worker"]
     restart: unless-stopped
     environment:
