@@ -181,33 +181,35 @@ for key in SETUP_APP_CLIENT_SECRET ENFONICA_SERVICE_ACCOUNT ENFONICA_NUMBER \
 done
 
 # Permission setup so the container can write to .env via the bind mount.
-# The container runs as user nextjs (uid 1001) in group nodejs (gid 1001).
-# .env is created by the host user (this script), so by default the host
-# user owns it with mode 600. Without changing this, the container hits
-# EACCES on every write — Settings UI saves silently fail with "Failed to
-# save settings".
+# The container runs as nextjs (uid 1001). .env is created by the host
+# user (this script), so by default the host user owns it. The container
+# can't write to a file it doesn't own with mode 600 → every Settings UI
+# save fails with "Failed to save settings" (EACCES on /app/config/host.env).
 #
-# Fix: keep host user as owner (so they can still edit .env directly with
-# their normal account), set group to 1001, and mode 660. Container's
-# nextjs user is a member of group 1001 so gets group write.
+# Fix: chown to 1001:1001 so the container's nextjs user owns it. mode
+# 600 is fine because owner = container = the only thing that needs to
+# write to it. Trade-off: the host user can no longer edit .env directly
+# with their normal account — they need sudo. Acceptable since
+# day-to-day editing happens through the Settings UI anyway.
 #
-# The chgrp typically needs root because the host user isn't in gid 1001.
-# We try without sudo first (works if running as root or already in 1001),
-# then escalate.
-chmod 660 .env
-if ! chgrp 1001 .env 2>/dev/null; then
+# Tried chgrp + mode 660 first (preserves host user as owner) but that
+# requires the container's nextjs user to be a member of gid 1001, which
+# depends on Dockerfile group membership and was only reliable from
+# v1.1.6 onward. chown is image-version-independent.
+if ! chown 1001:1001 .env 2>/dev/null; then
   if command -v sudo >/dev/null 2>&1; then
-    if ! sudo chgrp 1001 .env; then
-      red "Failed to chgrp .env to gid 1001. Container won't be able to save Settings."
-      red "Run this manually after install: sudo chgrp 1001 .env && sudo chmod 660 .env"
+    if ! sudo chown 1001:1001 .env; then
+      red "Failed to chown .env to uid 1001. Container won't be able to save Settings."
+      red "Run this manually after install: sudo chown 1001:1001 .env && sudo chmod 600 .env"
       exit 1
     fi
   else
-    red "Cannot chgrp .env to gid 1001 — sudo not available and current user isn't in that group."
+    red "Cannot chown .env to uid 1001 — sudo not available and not running as root."
     red "The container won't be able to save Settings. Run as root or fix manually after install."
     exit 1
   fi
 fi
+chmod 600 .env
 
 # ── Pull + start ─────────────────────────────────────────────────────────────
 
