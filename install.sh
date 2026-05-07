@@ -156,8 +156,48 @@ if [ -z "$(get_env NEXTAUTH_SECRET)" ]; then
   GENERATED+=("NEXTAUTH_SECRET")
 fi
 
-# DB_PASSWORD + DATABASE_URL — auto-generated
+# DB_PASSWORD + DATABASE_URL — auto-generated.
+#
+# Footgun guard: if .env has no DB_PASSWORD but a postgres data volume
+# already exists from a previous install, generating a fresh DB_PASSWORD
+# now will produce credentials that don't match the password baked into
+# the volume's PG_HBA / pg_authid on first init. The container starts
+# but every connection fails with:
+#   Error: P1000: Authentication failed against database server
+# Postgres ignores POSTGRES_PASSWORD after the data dir is initialised,
+# so re-syncing means either putting the original password back, or
+# wiping the volume.
+#
+# Detect this and exit with a clear remediation rather than silently
+# bricking the install.
 if [ -z "$(get_env DB_PASSWORD)" ]; then
+  EXISTING_PG_VOL=$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep "_postgres_data$" | head -1 || true)
+  if [ -n "$EXISTING_PG_VOL" ]; then
+    echo
+    red "An existing postgres data volume was detected:"
+    red "  ${EXISTING_PG_VOL}"
+    red ""
+    red ".env has no DB_PASSWORD, so install.sh would generate a new one."
+    red "That won't match the password baked into the existing volume from"
+    red "first init — the app will then fail with:"
+    red "  Error: P1000: Authentication failed against database server"
+    red ""
+    red "Pick one and re-run install.sh:"
+    red ""
+    red "  Option A — keep the data, restore the original DB_PASSWORD:"
+    red "    The platform writes .env.backup once a day when an admin opens"
+    red "    the Settings page. Look for it next to .env. If found:"
+    red "      cp .env.backup .env"
+    red "    Otherwise, find the original DB_PASSWORD wherever you have it"
+    red "    and edit .env directly:"
+    red "      echo 'DB_PASSWORD=<original-value>' >> .env"
+    red ""
+    red "  Option B — wipe the volume and start fresh (LOSES ALL DATA;"
+    red "  fine pre-production, very destructive otherwise):"
+    red "    docker compose down -v"
+    red "    ./install.sh"
+    exit 1
+  fi
   PW=$(generate_password)
   set_env DB_PASSWORD "$PW"
   set_env DATABASE_URL "postgresql://sms:${PW}@postgres:5432/smsdb"
